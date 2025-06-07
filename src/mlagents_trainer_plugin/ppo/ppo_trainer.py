@@ -216,3 +216,8 @@ class PPOTrainer(OnPolicyTrainer):
     @staticmethod
     def get_trainer_name() -> str:
         return TRAINER_NAME
+    
+
+
+def get_type_and_setting():
+    return {PPOTrainer.get_trainer_name(): PPOTrainer}, {PPOTrainer.get_trainer_name(): PPOSettings}

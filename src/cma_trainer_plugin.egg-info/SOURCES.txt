@@ -1,0 +1,13 @@
+LICENSE
+README.md
+pyproject.toml
+src/cma_trainer_plugin.egg-info/PKG-INFO
+src/cma_trainer_plugin.egg-info/SOURCES.txt
+src/cma_trainer_plugin.egg-info/dependency_links.txt
+src/cma_trainer_plugin.egg-info/top_level.txt
+src/mlagents_trainer_plugin/__init__.py
+src/mlagents_trainer_plugin/a2c/__init__.py
+src/mlagents_trainer_plugin/dqn/__init__.py
+src/mlagents_trainer_plugin/ppo/__init__.py
+src/mlagents_trainer_plugin/ppo/ppo_optimizer.py
+src/mlagents_trainer_plugin/ppo/ppo_trainer.py
