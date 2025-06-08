@@ -1,0 +1,2 @@
+[mlagents.trainers.plugin.trainer]
+custom_ppo = mlagents_trainer_plugin.ppo.ppo_trainer:get_type_and_setting

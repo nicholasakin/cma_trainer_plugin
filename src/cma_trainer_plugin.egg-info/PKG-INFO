@@ -1,18 +1,6 @@
-Metadata-Version: 2.4
-Name: cma_trainer_plugin
-Version: 0.0.1
-Summary: Custom Unity Trainer Plugin
-Author-email: "Akin, Nicholas" <nicholasakin@gmail.com>
-License-Expression: MIT
-Project-URL: Homepage, https://github.com/nicholasakin/cma_trainer_plugin
-Project-URL: Issues, https://github.com/nicholasakin/cma_trainer_plugin
-Classifier: Programming Language :: Python :: 3
-Classifier: Operating System :: OS Independent
-Requires-Python: >=3.9
-Description-Content-Type: text/markdown
+Metadata-Version: 2.1
+Name: cma-trainer-plugin
+Version: 0.1
+Summary: Custom PPO trainer plugin for Unity ML-Agents
+Author: Your Name
 License-File: LICENSE
-Dynamic: license-file
-
-# Python Custom Trainer Plugin
-
-Custom python trainer plugin for Unity
