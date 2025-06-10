@@ -1,0 +1,32 @@
+behaviors:
+  # 3DBall:
+  PushBlock:
+    trainer_type: a2c
+    hyperparameters:
+      # batch_size: 1000
+      batch_size: 1024
+      # buffer_size: 1000
+      buffer_size: 8192
+      learning_rate: 0.0003
+      # beta: 0.001
+      beta: 0.005
+      num_epoch: 1
+      learning_rate_schedule: linear
+    network_settings:
+      normalize: true
+      # hidden_units: 128
+      hidden_units: 256
+      # num_layers: 2
+      num_layers: 3
+      vis_encode_type: simple
+    reward_signals:
+      extrinsic:
+        gamma: 0.99
+        strength: 1.0
+      curiosity:
+        gamma: 0.99
+        strength: 0.05 #tune between 0.01-0.10
+    keep_checkpoints: 5
+    max_steps: 500000
+    time_horizon: 1000
+    summary_freq: 1000

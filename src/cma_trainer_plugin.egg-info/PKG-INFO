@@ -1,6 +1,0 @@
-Metadata-Version: 2.1
-Name: cma-trainer-plugin
-Version: 0.1
-Summary: Custom PPO trainer plugin for Unity ML-Agents
-Author: Your Name
-License-File: LICENSE

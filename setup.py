@@ -1,20 +1,19 @@
-from setuptools import setup, find_packages
+from setuptools import setup
+from mlagents.plugins import ML_AGENTS_TRAINER_TYPE
 
 setup(
-    name="cma_trainer_plugin",
-    version="0.1",
-    description="Custom PPO trainer plugin for Unity ML-Agents",
-    author="Your Name",
-    packages=find_packages(where="src"),
-    package_dir={"": "src"},
-    install_requires=[
-        "mlagents>=1.2.0.dev0",  # Match your installed version
-    ],
+    name="mlagents_trainer_plugin",
+    version="0.0.1",
+    # Example of how to add your own registration functions that will be called
+    # by mlagents-learn.
+    #
+    # Here, the get_example_stats_writer() function in mlagents_plugin_examples/example_stats_writer.py
+    # will get registered with the ML_AGENTS_STATS_WRITER plugin interface.
     entry_points={
-        "mlagents.trainers.plugin.trainer": [
-            "custom_ppo=mlagents_trainer_plugin.ppo.ppo_trainer:get_type_and_setting"
+        ML_AGENTS_TRAINER_TYPE: [
+            "a2c=mlagents_trainer_plugin.a2c.a2c_trainer:get_type_and_setting",
+            "dqn=mlagents_trainer_plugin.dqn.dqn_trainer:get_type_and_setting",
+            "ppo=mlagents_trainer_plugin.ppo.ppo:get_type_and_setting",
         ]
     },
-    include_package_data=True,
-    zip_safe=False,
 )

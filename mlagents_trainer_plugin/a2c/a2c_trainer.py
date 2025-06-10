@@ -1,25 +1,19 @@
+# # Unity ML-Agents Toolkit
+# ## ML-Agent Learning (A2C)
+# Contains an implementation of A2C as described in: https://arxiv.org/abs/1707.06347
 
-"""MLAgents Custom Trainer Plugin
-
-    website:
-        https://github.com/Unity-Technologies/ml-agents/blob/develop/docs/Tutorial-Custom-Trainer-Plugin.md
-
-        PPO Example:
-        https://github.com/Unity-Technologies/ml-agents/blob/develop/ml-agents/mlagents/trainers/ppo/trainer.py   
-"""
-    
-from typing import cast, Type, Union, Dict, Any
+from typing import cast
 
 import numpy as np
-from mlagents_envs.base_env import BehaviorSPec
+
+from mlagents_envs.base_env import BehaviorSpec
 from mlagents_envs.logging_util import get_logger
 from mlagents.trainers.buffer import BufferKey, RewardSignalUtil
 from mlagents.trainers.trainer.on_policy_trainer import OnPolicyTrainer
-from mlagents.trainers.policy.policy import Policy
-from mlagents.trainers.trainer.trainer_utils import get_gae
 from mlagents.trainers.optimizer.torch_optimizer import TorchOptimizer
+from mlagents.trainers.trainer.trainer_utils import get_gae
 from mlagents.trainers.policy.torch_policy import TorchPolicy
-from mlagents.trainers.ppo.optimizer_torch import TorchPPOOptimizer, PPOSettings
+from .a2c_optimizer import A2COptimizer, A2CSettings
 from mlagents.trainers.trajectory import Trajectory
 from mlagents.trainers.behavior_id_utils import BehaviorIdentifiers
 from mlagents.trainers.settings import TrainerSettings
@@ -28,11 +22,11 @@ from mlagents.trainers.torch_entities.networks import SimpleActor, SharedActorCr
 
 logger = get_logger(__name__)
 
-TRAINER_NAME = "ppo"
+TRAINER_NAME = "a2c"
 
 
-class PPOTrainer(OnPolicyTrainer):
-    """The PPOTrainer is an implementation of the PPO algorithm."""
+class A2CTrainer(OnPolicyTrainer):
+    """The A2CTrainer is an implementation of the A2C algorithm."""
 
     def __init__(
         self,
@@ -45,7 +39,7 @@ class PPOTrainer(OnPolicyTrainer):
         artifact_path: str,
     ):
         """
-        Responsible for collecting experiences and training PPO model.
+        Responsible for collecting experiences and training A2C model.
         :param behavior_name: The name of the behavior associated with trainer config
         :param reward_buff_cap: Max reward history to track in the reward buffer
         :param trainer_settings: The parameters for the trainer.
@@ -63,10 +57,9 @@ class PPOTrainer(OnPolicyTrainer):
             seed,
             artifact_path,
         )
-        self.hyperparameters: PPOSettings = cast(
-            PPOSettings, self.trainer_settings.hyperparameters
+        self.hyperparameters: A2CSettings = cast(
+            A2CSettings, self.trainer_settings.hyperparameters
         )
-        self.seed = seed
         self.shared_critic = self.hyperparameters.shared_critic
         self.policy: TorchPolicy = None  # type: ignore
 
@@ -170,7 +163,10 @@ class PPOTrainer(OnPolicyTrainer):
             self._update_end_episode_stats(agent_id, self.optimizer)
 
     def create_optimizer(self) -> TorchOptimizer:
-        return TorchPPOOptimizer(  # type: ignore
+        """
+        Creates an Optimizer object
+        """
+        return A2COptimizer(  # type: ignore
             cast(TorchPolicy, self.policy), self.trainer_settings  # type: ignore
         )  # type: ignore
 
@@ -183,11 +179,8 @@ class PPOTrainer(OnPolicyTrainer):
         :param behavior_spec: specifications for policy construction
         :return policy
         """
-        actor_cls: Union[Type[SimpleActor], Type[SharedActorCritic]] = SimpleActor
-        actor_kwargs: Dict[str, Any] = {
-            "conditional_sigma": False,
-            "tanh_squash": False,
-        }
+        actor_cls = SimpleActor
+        actor_kwargs = {"conditional_sigma": False, "tanh_squash": False}
         if self.shared_critic:
             reward_signal_configs = self.trainer_settings.reward_signals
             reward_signal_names = [
@@ -205,19 +198,16 @@ class PPOTrainer(OnPolicyTrainer):
         )
         return policy
 
-    def get_policy(self, name_behavior_id: str) -> Policy:
-        """
-        Gets policy from trainer associated with name_behavior_id
-        :param name_behavior_id: full identifier of policy
-        """
-
-        return self.policy
+    @staticmethod
+    def get_settings_type():
+        return A2CSettings
 
     @staticmethod
     def get_trainer_name() -> str:
         return TRAINER_NAME
-    
 
 
 def get_type_and_setting():
-    return {PPOTrainer.get_trainer_name(): PPOTrainer}, {PPOTrainer.get_trainer_name(): PPOSettings}
+    return {A2CTrainer.get_trainer_name(): A2CTrainer}, {
+        A2CTrainer.get_trainer_name(): A2CSettings
+    }
