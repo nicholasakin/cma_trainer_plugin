@@ -1,213 +1,92 @@
-# # Unity ML-Agents Toolkit
-# ## ML-Agent Learning (A2C)
-# Contains an implementation of A2C as described in: https://arxiv.org/abs/1707.06347
+import torch
+from mlagents_envs.environment import UnityEnvironment
+from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
+from torch.utils.tensorboard import SummaryWriter
+from ppo_optimizer import PPOCustomOptimizer
+from ppo_policy_network import ActorCriticNetwork
 
-from typing import cast
-
-import numpy as np
-
-from mlagents_envs.base_env import BehaviorSpec
-from mlagents_envs.logging_util import get_logger
-from mlagents.trainers.buffer import BufferKey, RewardSignalUtil
-from mlagents.trainers.trainer.on_policy_trainer import OnPolicyTrainer
-from mlagents.trainers.optimizer.torch_optimizer import TorchOptimizer
-from mlagents.trainers.trainer.trainer_utils import get_gae
-from mlagents.trainers.policy.torch_policy import TorchPolicy
-from .ppo_optimizer import PPOOptimizer, PPOSettings
-from mlagents.trainers.trajectory import Trajectory
-from mlagents.trainers.behavior_id_utils import BehaviorIdentifiers
-from mlagents.trainers.settings import TrainerSettings
-
-from mlagents.trainers.torch_entities.networks import SimpleActor, SharedActorCritic
-
-logger = get_logger(__name__)
-
-TRAINER_NAME = "ppo"
-
-
-class PPOTrainer(OnPolicyTrainer):
-    """The PPO Trainer is an implementation of the PPO algorithm."""
-
-    def __init__(
-        self,
-        behavior_name: str,
-        reward_buff_cap: int,
-        trainer_settings: TrainerSettings,
-        training: bool,
-        load: bool,
-        seed: int,
-        artifact_path: str,
-    ):
-        """
-        Responsible for collecting experiences and training A2C model.
-        :param behavior_name: The name of the behavior associated with trainer config
-        :param reward_buff_cap: Max reward history to track in the reward buffer
-        :param trainer_settings: The parameters for the trainer.
-        :param training: Whether the trainer is set for training.
-        :param load: Whether the model should be loaded.
-        :param seed: The seed the model will be initialized with
-        :param artifact_path: The directory within which to store artifacts from this trainer.
-        """
-        super().__init__(
-            behavior_name,
-            reward_buff_cap,
-            trainer_settings,
-            training,
-            load,
-            seed,
-            artifact_path,
+class PPOTrainer:
+    def __init__(self, config_yaml: str, env_path: str):
+        # Load YAML config yourself or pass in a dict
+        import yaml
+        settings = yaml.safe_load(open(config_yaml))["behaviors"]["3DBall"]
+        self.hp = settings['hyperparameters']
+        rc = settings['reward_signals']['extrinsic']
+        self.gamma = rc['gamma']
+        # Build environment with no graphics for speed
+        channel = EngineConfigurationChannel()
+        channel.set_configuration_parameters(time_scale=20.0)
+        self.env = UnityEnvironment(
+            file_name=env_path,
+            side_channels=[channel]
         )
-        self.hyperparameters: PPOSettings= cast(
-            PPOSettings, self.trainer_settings.hyperparameters
-        )
-        self.shared_critic = self.hyperparameters.shared_critic
-        self.policy: TorchPolicy = None  # type: ignore
+        self.env.reset()
+        spec = list(self.env.behavior_specs.values())[0]
+        obs_shape = spec.observation_shapes[0][0]
+        action_size = spec.action_spec.discrete_branches[0]
+        # Build policy network
+        self.policy = ActorCriticNetwork(obs_shape, action_size)
+        self.optimizer = PPOCustomOptimizer(self.policy, types.SimpleNamespace(hyperparameters=self.hp, reward_signals=types.SimpleNamespace(extrinsic=types.SimpleNamespace(gamma=self.gamma))),)
+        self.time_horizon = settings['time_horizon']
+        self.max_steps = settings['max_steps']
+        self.writer = SummaryWriter(log_dir="./ppo_logs")
 
-    def _process_trajectory(self, trajectory: Trajectory) -> None:
-        """
-        Takes a trajectory and processes it, putting it into the update buffer.
-        Processing involves calculating value and advantage targets for model updating step.
-        :param trajectory: The Trajectory tuple containing the steps to be processed.
-        """
-        super()._process_trajectory(trajectory)
-        agent_id = trajectory.agent_id  # All the agents should have the same ID
+    def collect_rollout(self):
+        spec = list(self.env.behavior_specs.values())[0]
+        decision_steps, terminal_steps = self.env.get_steps(list(self.env.behavior_specs.keys())[0])
+        obs_list, action_list, logp_list, reward_list, done_list, value_list = [], [], [], [], [], []
+        step=0
+        while step < self.time_horizon:
+            # Get current obs
+            decision_steps, terminal_steps = self.env.get_steps(list(self.env.behavior_specs.keys())[0])
+            obs = torch.from_numpy(decision_steps.obs[0]).float()
+            dist, value = self.policy.forward(obs)
+            action = dist.sample()
+            logp = dist.log_prob(action)
+            # Step the environment
+            action_tuple = spec.action_spec.empty_action(n_agents=len(decision_steps))
+            action_tuple.add_discrete(action.cpu().numpy())
+            self.env.set_actions(list(self.env.behavior_specs.keys())[0], action_tuple)
+            self.env.step()
+            # Record
+            obs_list.append(obs)
+            action_list.append(action)
+            logp_list.append(logp)
+            value_list.append(value)
+            # Rewards & dones
+            next_decision, next_terminal = self.env.get_steps(list(self.env.behavior_specs.keys())[0])
+            reward = torch.tensor([r.reward for r in next_decision + next_terminal], dtype=torch.float32)
+            done = torch.tensor([1 if ts else 0 for ts in next_terminal], dtype=torch.float32)
+            reward_list.append(reward)
+            done_list.append(done)
+            step += 1
+        # After horizon, get value for last state
+        _, last_value = self.policy.forward(obs_list[-1])
+        value_list.append(last_value)
+        # Stack tensors
+        rollout = {
+            'obs': torch.vstack(obs_list),
+            'actions': torch.cat(action_list),
+            'log_probs': torch.cat(logp_list),
+            'rewards': torch.cat(reward_list),
+            'dones': torch.cat(done_list),
+            'values': torch.cat(value_list),
+        }
+        return rollout
 
-        agent_buffer_trajectory = trajectory.to_agentbuffer()
-        # Check if we used group rewards, warn if so.
-        self._warn_if_group_reward(agent_buffer_trajectory)
+    def train(self):
+        total_steps = 0
+        while total_steps < self.max_steps:
+            rollout = self.collect_rollout()
+            self.optimizer.update(rollout)
+            total_steps += len(rollout['rewards'])
+            # Logging
+            if total_steps % self.hp['summary_freq'] == 0:
+                self.writer.add_scalar('reward/mean', rollout['rewards'].mean().item(), total_steps)
+        # Save final model
+        torch.save(self.policy.state_dict(), "ppo_final.pt")
 
-        # Update the normalization
-        if self.is_training:
-            self.policy.actor.update_normalization(agent_buffer_trajectory)
-            self.optimizer.critic.update_normalization(agent_buffer_trajectory)
-
-        # Get all value estimates
-        (
-            value_estimates,
-            value_next,
-            value_memories,
-        ) = self.optimizer.get_trajectory_value_estimates(
-            agent_buffer_trajectory,
-            trajectory.next_obs,
-            trajectory.done_reached and not trajectory.interrupted,
-        )
-        if value_memories is not None:
-            agent_buffer_trajectory[BufferKey.CRITIC_MEMORY].set(value_memories)
-
-        for name, v in value_estimates.items():
-            agent_buffer_trajectory[RewardSignalUtil.value_estimates_key(name)].extend(
-                v
-            )
-            self._stats_reporter.add_stat(
-                f"Policy/{self.optimizer.reward_signals[name].name.capitalize()} Value Estimate",
-                np.mean(v),
-            )
-
-        # Evaluate all reward functions
-        self.collected_rewards["environment"][agent_id] += np.sum(
-            agent_buffer_trajectory[BufferKey.ENVIRONMENT_REWARDS]
-        )
-        for name, reward_signal in self.optimizer.reward_signals.items():
-            evaluate_result = (
-                reward_signal.evaluate(agent_buffer_trajectory) * reward_signal.strength
-            )
-            agent_buffer_trajectory[RewardSignalUtil.rewards_key(name)].extend(
-                evaluate_result
-            )
-            # Report the reward signals
-            self.collected_rewards[name][agent_id] += np.sum(evaluate_result)
-
-        # Compute GAE and returns
-        tmp_advantages = []
-        tmp_returns = []
-        for name in self.optimizer.reward_signals:
-            bootstrap_value = value_next[name]
-
-            local_rewards = agent_buffer_trajectory[
-                RewardSignalUtil.rewards_key(name)
-            ].get_batch()
-            local_value_estimates = agent_buffer_trajectory[
-                RewardSignalUtil.value_estimates_key(name)
-            ].get_batch()
-
-            local_advantage = get_gae(
-                rewards=local_rewards,
-                value_estimates=local_value_estimates,
-                value_next=bootstrap_value,
-                gamma=self.optimizer.reward_signals[name].gamma,
-                lambd=self.hyperparameters.lambd,
-            )
-            local_return = local_advantage + local_value_estimates
-            # This is later use as target for the different value estimates
-            agent_buffer_trajectory[RewardSignalUtil.returns_key(name)].set(
-                local_return
-            )
-            agent_buffer_trajectory[RewardSignalUtil.advantage_key(name)].set(
-                local_advantage
-            )
-            tmp_advantages.append(local_advantage)
-            tmp_returns.append(local_return)
-
-        # Get global advantages
-        global_advantages = list(
-            np.mean(np.array(tmp_advantages, dtype=np.float32), axis=0)
-        )
-        global_returns = list(np.mean(np.array(tmp_returns, dtype=np.float32), axis=0))
-        agent_buffer_trajectory[BufferKey.ADVANTAGES].set(global_advantages)
-        agent_buffer_trajectory[BufferKey.DISCOUNTED_RETURNS].set(global_returns)
-
-        self._append_to_update_buffer(agent_buffer_trajectory)
-
-        # If this was a terminal trajectory, append stats and reset reward collection
-        if trajectory.done_reached:
-            self._update_end_episode_stats(agent_id, self.optimizer)
-
-    def create_optimizer(self) -> TorchOptimizer:
-        """
-        Creates an Optimizer object
-        """
-        return PPOOptimizer(  # type: ignore
-            cast(TorchPolicy, self.policy), self.trainer_settings  # type: ignore
-        )  # type: ignore
-
-    def create_policy(
-        self, parsed_behavior_id: BehaviorIdentifiers, behavior_spec: BehaviorSpec
-    ) -> TorchPolicy:
-        """
-        Creates a policy with a PyTorch backend and PPO hyperparameters
-        :param parsed_behavior_id:
-        :param behavior_spec: specifications for policy construction
-        :return policy
-        """
-        actor_cls = SimpleActor
-        actor_kwargs = {"conditional_sigma": False, "tanh_squash": False}
-        if self.shared_critic:
-            reward_signal_configs = self.trainer_settings.reward_signals
-            reward_signal_names = [
-                key.value for key, _ in reward_signal_configs.items()
-            ]
-            actor_cls = SharedActorCritic
-            actor_kwargs.update({"stream_names": reward_signal_names})
-
-        policy = TorchPolicy(
-            self.seed,
-            behavior_spec,
-            self.trainer_settings.network_settings,
-            actor_cls,
-            actor_kwargs,
-        )
-        return policy
-
-    @staticmethod
-    def get_settings_type():
-        return PPOSettings 
-
-    @staticmethod
-    def get_trainer_name() -> str:
-        return TRAINER_NAME
-
-
-def get_type_and_setting():
-    return {PPOTrainer.get_trainer_name(): PPOTrainer}, {
-        PPOTrainer.get_trainer_name(): PPOSettings
-    }
+if __name__ == '__main__':
+    import sys
+    trainer = PPOTrainer(sys.argv[1], sys.argv[2])
+    trainer.train()

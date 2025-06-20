@@ -1,32 +1,68 @@
+# behaviors:
+#   PushBlock:
+#     trainer_type: ppo 
+#     hyperparameters:
+#       batch_size: 1024
+#       buffer_size: 10240
+#       learning_rate: 0.0003
+#       beta: 0.005
+#       num_epoch: 3
+#       learning_rate_schedule: linear
+#       beta_schedule: constant
+#     network_settings:
+#       normalize: true
+#       hidden_units: 128
+#       # hidden_units: 256
+#       # num_layers: 2
+#       num_layers: 3
+#       # vis_encode_type: simple
+#     reward_signals:
+#       extrinsic:
+#         gamma: 0.99
+#         strength: 1.0
+#       # curiosity:
+#       #   gamma: 0.99
+#       #   strength: 0.05 #tune between 0.01-0.10
+#     keep_checkpoints: 5
+#     max_steps: 500000
+#     # time_horizon: 1000
+#     time_horizon: 64 
+#     summary_freq: 1000
 behaviors:
-  # 3DBall:
   PushBlock:
-    trainer_type: a2c
+    trainer_type: ppo
     hyperparameters:
-      # batch_size: 1000
-      batch_size: 1024
-      # buffer_size: 1000
-      buffer_size: 8192
-      learning_rate: 0.0003
-      # beta: 0.001
-      beta: 0.005
-      num_epoch: 1
-      learning_rate_schedule: linear
+      # —— Data & update frequency ——
+      batch_size:  4096         # large batch for low-variance gradients
+      buffer_size: 65536        # ~16× batch to amortize collection cost
+      time_horizon: 128         # medium horizon for credit assignment
+
+      # —— Learning & clipping ——
+      learning_rate:           3.0e-4
+      learning_rate_schedule:  linear
+      epsilon:                 0.1      # tighter clip for late stability
+      beta:                    0.02     # entropy bonus to prevent early collapse
+      beta_schedule:           linear   # anneal from 0.02 → 0.005 over run
+
+      # —— Advantage estimation & epochs ——
+      lambd:        0.95       # GAE λ: bias–variance tradeoff
+      num_epoch:    5          # extra passes to squeeze signal
+
     network_settings:
-      normalize: true
-      # hidden_units: 128
-      hidden_units: 256
-      # num_layers: 2
-      num_layers: 3
-      vis_encode_type: simple
+      normalize:      true
+      hidden_units:   256
+      num_layers:     3
+
     reward_signals:
       extrinsic:
-        gamma: 0.99
-        strength: 1.0
-      curiosity:
-        gamma: 0.99
-        strength: 0.05 #tune between 0.01-0.10
-    keep_checkpoints: 5
-    max_steps: 500000
-    time_horizon: 1000
-    summary_freq: 1000
+        gamma:      0.995
+        strength:   1.0
+      curiosity:     # optional—helps keep exploring
+        gamma:      0.995
+        strength:   0.02
+        strength_schedule: linear  # decay over 5 M steps
+
+    # —— Run control & logging ——
+    max_steps:        5000000     # 5 million total
+    keep_checkpoints: 10
+    summary_freq:     10_000        # logs every 5 k steps
