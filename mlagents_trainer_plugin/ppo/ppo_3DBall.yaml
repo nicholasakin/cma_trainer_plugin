@@ -35,7 +35,6 @@ behaviors:
       # —— Data & update frequency ——
       batch_size:  4096         # large batch for low-variance gradients
       buffer_size: 65536        # ~16× batch to amortize collection cost
-      time_horizon: 128         # medium horizon for credit assignment
 
       # —— Learning & clipping ——
       learning_rate:           3.0e-4
@@ -60,7 +59,6 @@ behaviors:
       curiosity:     # optional—helps keep exploring
         gamma:      0.995
         strength:   0.02
-        strength_schedule: linear  # decay over 5 M steps
 
     # —— Run control & logging ——
     max_steps:        5000000     # 5 million total
